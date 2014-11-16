@@ -3,9 +3,13 @@ import numpy as np
 import os
 import os.path as op
 from sklearn.neighbors import LSHForest, NearestNeighbors
-from sklearn.cross_validation import train_test_split
+from sklearn.cross_validation import train_test_spli
+from sklearn.preprocessing import normalize
 from time import time
-from urllib.request import urlretrieve
+try:
+    from urllib.request import urlretrieve
+except ImportError:
+    from urllib import urlretrieve
 
 from joblib import Memory
 
@@ -24,7 +28,7 @@ def load_glove_embedding(filepath):
         for line in f:
             i += 1
             components = line.strip().split()
-            words.append(components[0])
+            words.append(components[0].decode('utf-8'))
             vectors.append(np.array([float(x) for x in components[1:]]))
     print("loaded %d vectors" % i)
     return words, np.vstack(vectors)
@@ -32,32 +36,35 @@ def load_glove_embedding(filepath):
 
 @m.cache
 def build_index(data, n_estimators=20, n_candidates=100, n_neighbors=10, seed=0):
-    print("Building LSHF(n_estimators=%dn_candidates) on data with shape=%r."
-          % (n_estimators, data.shape))
     lshf = LSHForest(n_estimators=n_estimators, n_candidates=n_candidates,
                      n_neighbors=n_neighbors, random_state=seed)
     t0 = time()
     lshf.fit(data)
     duration = time() - t0
-    print("Built LSHF(n_estimators=%d) on data with shape=%r in %0.3fs"
-          % (n_estimators, data.shape, duration))
     return lshf, duration
 
 
 @m.cache
-def query_exact(data, query, n_neighbors=10):
-    nn = NearestNeighbors(metric='cosine', algorithm='brute')
+def query_exact(data, query, n_neighbors=10, metric='cosine',
+                algorithm='brute'):
+    nn = NearestNeighbors(metric=metric, algorithm=algorithm,
+                          n_neighbors=n_neighbors)
     t0 = time()
-    neighbors = nn.fit(data).kneighbors(query, n_neighbors=10)
-    duration = time() - t0
-    print("Perform %d exact queries on data with shape=%r in %0.3fs"
-          % (n_neighbors, data.shape, duration))
-    return neighbors, duration
+    nn.fit(data)
+    build_duration = time() - t0
+
+    t0 = time()
+    neighbors = nn.kneighbors(query)
+    query_duration = time() - t0
+    return neighbors, build_duration, query_duration
 
 
 if __name__ == '__main__':
     import sys
-    n_queries = 100
+    n_queries = 10
+    n_neighbors = 10
+    n_estimators = 30
+    n_candidates = 10000
     if len(sys.argv) > 1:
         filepath = os.path.abspath(sys.argv[1])
     else:
@@ -74,4 +81,55 @@ if __name__ == '__main__':
 
     vectors_index, vectors_query, words_index, words_query = train_test_split(
         vectors, words, test_size=n_queries, random_state=0)
-    lshf_20_100 = build_index(vectors, n_estimators=20, n_candidates=200)
+
+    # Perform exact knn queries with brute force as a reference
+    exact_nn, _, exact_duration = query_exact(
+        vectors_index, vectors_query, n_neighbors=n_neighbors)
+    print("Performing %d exact queries on data with shape=%r took %0.3fs"
+          % (n_queries, vectors_index.shape, exact_duration))
+
+    # Benchmark LSHF model
+    lshf, lshf_build_duration = build_index(
+        vectors_index, n_estimators=n_estimators, n_candidates=n_candidates)
+    print("Building LSHF(n_estimators=%d) on data with shape=%r took %0.3fs"
+          % (n_estimators, vectors_index.shape, lshf_build_duration))
+
+    t0 = time()
+    lshf_nn = lshf.kneighbors(vectors_query, n_neighbors=n_neighbors)
+    lshf_duration = time() - t0
+    print("Performing %d LSHF queries on data with shape=%r took %0.3fs"
+          % (n_queries, vectors_index.shape, lshf_duration))
+
+    print("LSHF precision: %0.3f" % np.in1d(lshf_nn[1], exact_nn[1]).mean())
+
+    # Benchmark LSHF model on normalized data
+    # vectors_index_normed = normalize(vectors_index)
+    # vectors_query_normed = normalize(vectors_query)
+    #
+    # lshf_normed, lshf_build_duration = build_index(
+    #     vectors_index_normed, n_estimators=n_estimators,
+    #     n_candidates=n_candidates)
+    # print("Building LSHF(n_estimators=%d) on data with shape=%r took %0.3fs"
+    #       % (n_estimators, vectors_index_normed.shape, lshf_build_duration))
+    #
+    # t0 = time()
+    # lshf_normed_nn = lshf_normed.kneighbors(vectors_query_normed,
+    #                                         n_neighbors=n_neighbors)
+    # lshf_duration = time() - t0
+    # print("Performing %d LSHF queries on data with shape=%r took %0.3fs"
+    #       % (n_queries, vectors_index_normed.shape, lshf_duration))
+    #
+    # print("LSHF (normed) precision: %0.3f"
+    #       % np.in1d(lshf_normed_nn[1], exact_nn[1]).mean())
+
+    # Benchmark Ball Tree with euclidean distance as cosine is not available
+    # bt_nn, bt_build_duration, bt_duration = query_exact(
+    #     vectors_index, vectors_query, n_neighbors=n_neighbors,
+    #     algorithm='ball_tree', metric='euclidean')
+    # print("Build BT index on data with shape=%r took %0.3fs"
+    #       % (vectors_index.shape, bt_build_duration))
+    # print("Performing %d BT queries on data with shape=%r took %0.3fs"
+    #       % (n_queries, vectors_index.shape, bt_duration))
+    # print("BT precision: %0.3f" % np.in1d(bt_nn[1], exact_nn[1]).mean())
+    #
+    # print("LSHF / BT precision: %0.3f" % np.in1d(bt_nn[1], lshf_nn[1]).mean())
