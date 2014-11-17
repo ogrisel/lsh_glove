@@ -62,6 +62,7 @@ def query_exact(data, query, n_neighbors=10, metric='cosine',
     return neighbors, build_duration, query_duration
 
 
+@m.cache
 def explore_lshf_forest(lshf, queries, exact_nn, n_neighbors=None):
     lshf = copy(lshf)  # shallow copy to modify top level attributes
     all_n_estimators, n_estimators = [], lshf.n_estimators
@@ -104,7 +105,7 @@ if __name__ == '__main__':
     import sys
     n_queries = 10
     n_neighbors = 10
-    n_estimators = 30
+    n_estimators = 100
     n_candidates = 10000
     if len(sys.argv) > 1:
         filepath = os.path.abspath(sys.argv[1])
@@ -142,6 +143,9 @@ if __name__ == '__main__':
           % (n_queries, vectors_index.shape, lshf_duration))
 
     print("LSHF precision: %0.3f" % np.in1d(lshf_nn[1], exact_nn[1]).mean())
+
+    results = explore_lshf_forest(lshf, vectors_query, exact_nn[1],
+                                  n_neighbors=n_neighbors)
 
     # Benchmark LSHF model on normalized data
     # vectors_index_normed = normalize(vectors_index)
