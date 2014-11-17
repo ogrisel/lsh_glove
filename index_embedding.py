@@ -62,7 +62,7 @@ def query_exact(data, query, n_neighbors=10, metric='cosine',
     return neighbors, build_duration, query_duration
 
 
-def explore_lshf_forest(lshf, queries, exact_nn, n_neigbors=None):
+def explore_lshf_forest(lshf, queries, exact_nn, n_neighbors=None):
     lshf = copy(lshf)  # shallow copy to modify top level attributes
     all_n_estimators, n_estimators = [], lshf.n_estimators
     while n_estimators > 1:
@@ -78,19 +78,19 @@ def explore_lshf_forest(lshf, queries, exact_nn, n_neigbors=None):
     iter_grid = product(all_n_estimators, all_n_candidates)
     for n_estimators, n_candidates in iter_grid:
         lshf.n_estimators = n_estimators
-        lsfg.n_candidates = n_candidates
+        lshf.n_candidates = n_candidates
         durations = []
         precisions = []
         for query in queries:
             t0 = time()
-            nn = lshf.kneighbors(query, return_distances=False,
-                                 n_neigbors=n_neighbors)
+            nn = lshf.kneighbors(query, return_distance=False,
+                                 n_neighbors=n_neighbors)
             durations.append(time() - t0)
             precisions.append(np.in1d(nn, exact_nn).mean())
 
         results.append(dict(
             n_estimators=n_estimators,
-            n_estimators=n_estimators,
+            n_candidates=n_candidates,
             query_durations_mean=np.mean(durations),
             query_durations_std=np.std(durations),
             query_precision_mean=np.mean(precisions),
