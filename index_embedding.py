@@ -3,7 +3,7 @@ import numpy as np
 import os
 import os.path as op
 from sklearn.neighbors import LSHForest, NearestNeighbors
-from sklearn.cross_validation import train_test_spli
+from sklearn.cross_validation import train_test_split
 from sklearn.preprocessing import normalize
 from time import time
 try:
